@@ -8,7 +8,7 @@ dotenv.config({ quiet: true });
 const DEFAULT_LEGI_URL = "https://www.legifrance.gouv.fr/";
 const DEFAULT_CHRONO_LEGI_URL: string = "https://www.legifrance.gouv.fr/chronolegi?cidText=LEGITEXT000006071191&libText=-&type=CODE&navigation=true";
 const PING_OWNER = true;
-const SEND_IF_NO_CHANGE = false;
+const SEND_IF_NO_CHANGE = true;
 const EMBED_COLOR = 0xED938E;
 const MAX_DESC_LENGTH = 4000;
 
