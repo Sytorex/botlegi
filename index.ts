@@ -8,7 +8,7 @@ dotenv.config({ quiet: true });
 const DEFAULT_LEGI_URL = "https://www.legifrance.gouv.fr/";
 const DEFAULT_CHRONO_LEGI_URL: string = "https://www.legifrance.gouv.fr/chronolegi?cidText=LEGITEXT000006071191&libText=-&type=CODE&navigation=true";
 const PING_OWNER = true;
-const SEND_IF_NO_CHANGE = true;
+const SEND_IF_NO_CHANGE = false;
 const EMBED_COLOR = 0xED938E;
 const MAX_DESC_LENGTH = 4000;
 
@@ -42,8 +42,8 @@ interface ParsedData {
 client.once("clientReady", async () => {
     console.log(`Logged as ${client.user?.tag}`);
 
-    // On programme la tâche cron pour s'exécuter tous les jours à 20h00
-    cron.schedule('0 20 * * *', async () => {
+    // On programme la tâche cron pour s'exécuter tous les jours à 22h00
+    cron.schedule('0 22 * * *', async () => {
         const channel = await client.channels.fetch(process.env.CHANNEL_ID!);
         if (channel != null && channel instanceof TextChannel && channel.isTextBased()) {            
             processLegiUpdates(channel);
@@ -98,13 +98,19 @@ function parseLegiData(rawHTML: string): ParsedData | null {
     const $ = cheerio.load(rawHTML);
     
     // Vérifier si il y a une version aujourd'hui
-    const today = new Date();
+    const today = new Date('2026-01-07');
     const todayFormatted = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`;
-    if ($(`.version-item a[data-date='${todayFormatted}']`).length === 0) return null;
+    if ($(`.version-item a[data-date='${todayFormatted}']`).length === 0) {
+        console.log("No version for today");
+        return null;
+    }
 
     // Trouver le conteneur de la version actuelle
     const container = $(".version-item.current-version").first();
-    if (!container.length) return null;
+    if (!container.length) {
+        console.log("Container not found");
+        return null;
+    }
     
     // Extraire la date
     const dateLink = container.find(".detail-timeline-title a");
@@ -237,6 +243,7 @@ function formatEmbeds(data: ParsedData): EmbedBuilder[] {
 async function processLegiUpdates(channel: TextChannel): Promise<void> {
     const htmlContent = await scrapeChronoLegi();
     const legiData = parseLegiData(htmlContent);
+    console.log(legiData);
     
     // Si des modifications légales sont détectées, envoyer un message avec l'embed
     if (legiData) {
