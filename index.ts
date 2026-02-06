@@ -1,9 +1,7 @@
 import * as cheerio from "cheerio";
 import { Client, EmbedBuilder, GatewayIntentBits, TextChannel } from "discord.js";
 import * as dotenv from "dotenv";
-import { promises as fs } from "fs";
 import cron from 'node-cron';
-import * as path from "path";
 import puppeteer from "puppeteer";
 dotenv.config({ quiet: true });
 
@@ -41,58 +39,15 @@ interface ParsedData {
     modifications: ModificationItem[];
 }
 
-interface LegiLog {
-    log_date: string;
-    versionItems: {
-        isCurrentVersion: boolean;
-        dateLink: string;
-        savedHtml: string;
-    }[];
-}
-
-const observedLogs: LegiLog[] = [];
-const LOGS_FILE_PATH = path.join(__dirname, 'observed_logs.json');
-
-console.log("Bot is starting...");
-console.log(LOGS_FILE_PATH);
-
-/**
- * Charge les logs depuis le fichier JSON s'il existe
- */
-async function loadLogs(): Promise<void> {
-    try {
-        // Crée le fichier s'il n'existe pas
-        await fs.access(LOGS_FILE_PATH).catch(async () => {
-            await fs.writeFile(LOGS_FILE_PATH, "[]", "utf-8");
-        });
-
-        const data = await fs.readFile(LOGS_FILE_PATH, "utf-8");
-        const logs = JSON.parse(data);
-        observedLogs.push(...logs);
-        console.log(`Loaded ${logs.length} logs from file`);
-    } catch (error) {
-        // Fichier n'existe pas encore ou erreur de lecture
-        console.log("No existing logs file found, starting fresh");
-    }
-}
-
-/**
- * Sauvegarde les logs dans le fichier JSON
- */
-async function saveLogs(): Promise<void> {
-    try {
-        await fs.writeFile(LOGS_FILE_PATH, JSON.stringify(observedLogs, null, 2), "utf-8");
-        console.log(`Saved ${observedLogs.length} logs to file`);
-    } catch (error) {
-        console.error("Error saving logs:", error);
-    }
-}
-
 client.once("clientReady", async () => {
     console.log(`Logged as ${client.user?.tag}`);
 
-    // Charger les logs existants
-    await loadLogs();
+    const channel = await client.channels.fetch(process.env.CHANNEL_ID!);
+    if (channel == null || !(channel instanceof TextChannel) || !channel.isTextBased()) {
+        console.error("Invalid channel ID or channel is not a text channel");
+        return;
+    }
+    processLegiUpdates(channel);
 
     // On programme la tâche cron pour s'exécuter tous les jours à 22h00
     cron.schedule('0 22 * * *', async () => {
@@ -103,19 +58,6 @@ client.once("clientReady", async () => {
     }, {
         timezone: "Europe/Paris"
     });
-
-    // On programme une tâche cron toute les heures pour vérifier les modifications en temps réel
-    cron.schedule('0 * * * *', async () => {
-        const channel = await client.channels.fetch(process.env.CHANNEL_ID!);
-        if (channel != null && channel instanceof TextChannel && channel.isTextBased()) {            
-            processLogUpdates(channel);
-        }
-    }, {
-        timezone: "Europe/Paris"
-    });
-
-    const channel = await client.channels.fetch(process.env.CHANNEL_ID!);
-        
 });
 
 /**
@@ -124,6 +66,7 @@ client.once("clientReady", async () => {
 async function scrapeChronoLegi() {
     // Obtenir la date actuelle au format YYYY-MM-DD
     const today = new Date().toISOString().split('T')[0];
+    console.log(today);
 
     // Construire l'URL avec les paramètres de date
     const url = `${DEFAULT_CHRONO_LEGI_URL}&startYear=${today}&endYear=${today}&dateConsult=${today}`;
@@ -326,55 +269,6 @@ async function processLegiUpdates(channel: TextChannel): Promise<void> {
         console.log(msgContent + ` ${new Date().toISOString().split('T')[0]}`);
         if (SEND_IF_NO_CHANGE) await channel.send(msgContent); // Envoyer sur discord seulement si configuré
     }
-}
-
-// Chaque heure, on observe si sur le site il y a eu des modification dans accordion-timeline-item[data-year="2026"] #expand_1 .version-item
-// Si oui, on scrape les données et on envoie un message Discord avec la dateUrl
-// Et surtout on log dans une base de données pour éviter les doublons (log_date = date du jour avec heure, dateUrl = url de la page de la version du jour)
-// Le but final est d'avoir l'information de l'heure à laquelle les modifications ont été publiées
-async function processLogUpdates(channel: TextChannel): Promise<void> {
-    const htmlContent = await scrapeChronoLegi();
-    
-    // Parse le HTML pour trouver la version du jour
-    const $ = cheerio.load(htmlContent);
-
-    const container = $(".accordion-timeline-item[data-year='2026'] #expand_1");
-    // On récupère l'ensemble des version item
-    const versionItems = container.find(".version-item");
-
-    if (versionItems.length === 0) {
-        console.log("No version items found in log update");
-        return;
-    }
-
-    const formatedVersionItems = versionItems.map((_, el) => {
-        const versionItem = $(el);
-        const dateLinkHtml = versionItem.find(".detail-timeline-title a");
-
-        return {
-            isCurrentVersion: versionItem.hasClass("current-version"),
-            dateLink: dateLinkHtml.html() ? "https://www.legifrance.gouv.fr" + dateLinkHtml.attr("href") : "",
-            savedHtml: versionItem.html() || ""
-        };
-    }).get();
-
-    try {
-        if (observedLogs.length > 0 && observedLogs[observedLogs.length - 1].versionItems.length < formatedVersionItems.length) {
-            // On envoie un message Discord pour chaque nouveau log
-            const content = `Nouvelle modification détectée <@410774625820082176>`;
-            channel.send(content);
-        }
-    } catch (error) {
-        console.error("Error sending log update message:", error);
-    }
-
-    observedLogs.push({
-        log_date: new Date().toISOString(),
-        versionItems: formatedVersionItems
-    });
-
-    // Sauvegarder les logs dans le fichier JSON
-    await saveLogs();
 }
 
 client.login(process.env.DISCORD_TOKEN!);
